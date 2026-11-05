@@ -1,0 +1,23 @@
+name: Release reviewed bundle
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: PYTHONPATH=src python -m unittest discover -s tests -v
+      - run: python bin/pstack-portable build
+      - run: python bin/pstack-portable package
+      - name: Publish immutable release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" dist/pstack-portable.tar.gz dist/pstack-portable.tar.gz.sha256 --verify-tag --generate-notes

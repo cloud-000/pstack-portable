@@ -1,0 +1,51 @@
+name: Propose upstream update
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 8 * * *'
+permissions:
+  contents: write
+  pull-requests: write
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Import latest upstream
+        run: python bin/pstack-portable sync
+      - name: Build candidate for review
+        run: python bin/pstack-portable build --candidate --output dist/candidate
+      - uses: actions/upload-artifact@v4
+        with:
+          name: upstream-candidate
+          path: dist/candidate
+      - name: Open review PR if none is pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet -- upstream upstream.lock; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          branch=automation/upstream-sync
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo 'An upstream review branch already exists. Finish or close that review before replacing it.'
+            exit 0
+          fi
+          git switch -c "$branch"
+          git add upstream upstream.lock sync-report.json
+          git commit -m 'Import latest pstack upstream for compatibility review'
+          git push origin "$branch"
+          cat > /tmp/pr-body.md <<'BODY'
+          Imports the latest canonical pstack tree at an exact commit.
+
+          Inspect sync-report.json, the source diff, and the uploaded candidate artifact. Update adapters and tests for changed assumptions, then run `pstack-portable review --accept` after completing the review. Normal builds intentionally fail until the new inputs are reviewed. This workflow never accepts its own adaptation review.
+          BODY
+          gh pr create --head "$branch" --title 'Review upstream pstack update' --body-file /tmp/pr-body.md
